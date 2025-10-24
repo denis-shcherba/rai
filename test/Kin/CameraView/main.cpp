@@ -49,9 +49,9 @@ void TEST(CameraView){
 void TEST(NoisyDepth){
   rai::Configuration C;
   C.addFile("$RAI_PATH/scenarios/pandaSingle.g");
-  C.addFile("../../../../rai-robotModels/objects/kitchen.g");
-  C.addFrame("mesh") ->setMeshFile("$RAI_PATH/g1/meshes/head_link.h5") .setColor({1.,.8,.5}) .setPosition({.1,.5,.4});
-  C.addFrame("box") ->setShape(rai::ST_box, {.1,.1,.1}) .setColor({1.,.8,.5}) .setPosition({-.2,.5,.7});
+  C.addFile("$RAI_PATH/objects/kitchen.g");
+  //C.addFrame("mesh") ->setMeshFile("$RAI_PATH/g1/meshes/giraffehd.h5") .setColor({1.,.8,.5}) .setPosition({.1,.5,.4});
+  C.addFrame("box") ->setShape(rai::ST_box, {.04,.04,.12}) .setColor({1.,.8,.5}) .setPosition({-.2,.5,.7});
   C.view();
 
   rai::CameraView V(C, true);
@@ -64,10 +64,10 @@ void TEST(NoisyDepth){
   Cdisp.addFile("$RAI_PATH/scenarios/pandaSingle.g");
   Cdisp.addFrame("pcl1", "cameraWrist");
   Cdisp.addFrame("pcl2", "cameraWrist");
-
+     
   auto opt = make_shared<rai::DepthNoiseOptions>();
-
-  for(uint t=0;t<100;t++){
+   
+  for(uint t=0;t<10000;t++){  
     //the same method is now integrated in computeImageAndDepth -- this is only to allow debugging
     auto& cam = V.setCamera(C["cameraWrist"]);
     V.computeImageAndDepth(image1, depth1);
@@ -84,8 +84,8 @@ void TEST(NoisyDepth){
     pts2.reshape(-1,3);
     for(uint i=0;i<pts2.d0;i++) pts2[i] += cam.offset.getArr();
 
-    {
-      Cdisp.getFrame("pcl1") ->setPointCloud(pts1, {255, 200, 100});
+    {     
+      Cdisp.getFrame("pcl1") ->setPointCloud(pts1, {150, 00, 255});
       Cdisp.getFrame("pcl2") ->setPointCloud(pts2, {200, 255, 100});
       int key = Cdisp.view(false);
       if(key=='q') break;
