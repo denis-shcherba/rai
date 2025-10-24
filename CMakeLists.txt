@@ -141,7 +141,7 @@ message(STATUS "[rai] pkg-config libraries: " "${DEPS_LIBRARIES}")
 target_link_libraries(rai PRIVATE
   ${DEPS_LIBRARIES}
   ${GLUT_LIBRARIES}
-  fcl ccd ANN
+  fcl ccd ann
   )
 
 ################################################################################

@@ -230,7 +230,7 @@ endif
 ifeq ($(ANN),1)
 #DEPEND_UBUNTU += libann-dev
 CXXFLAGS  += -DRAI_ANN
-LIBS += -lANN
+LIBS += -lann
 endif
 
 ifeq ($(QHULL),1)

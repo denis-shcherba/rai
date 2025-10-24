@@ -94,3 +94,6 @@ make -j4
       cmake --build git/rai/build 
 
 
+## testing
+
+      export RAI_PATH=/home/denis/miniconda3/envs/slam/lib/python3.10/site-packages/robotic/rai-robotModels
