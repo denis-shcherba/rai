@@ -248,6 +248,10 @@ void KomoArucoTracker::reset(bool force_contructor){
     komo->clearObjectives();
     komo->reset();
   }
+
+  pending.clear();
+  n_corners=0; n_gated=0;
+  accepted=false; lost=false;
 }
 
 void KomoArucoTracker::addArucoDetected(uint cam_id, uint aruco_id){
@@ -255,6 +259,7 @@ void KomoArucoTracker::addArucoDetected(uint cam_id, uint aruco_id){
 }
 
 void KomoArucoTracker::addPointView(arr p, uint cam_id, uint aruco_id, uint corner_id){
+  n_corners++;
   komo->addObjective({1.}, make_shared<F_PointView>(p, CS.Fxycxy(cam_id)), { STRING("arc_"<<aruco_id <<'_' <<corner_id), CS.cams(cam_id)->name }, OT_sos, {1e2});
 }
 
@@ -266,13 +271,50 @@ void KomoArucoTracker::addMultiPointView(const intA& ids, const arr& pts, uint c
         arr p = pts(i, j, {});
         if(std::isnan(p(0)) || std::isnan(p(1))) continue;
         if(undistort_points) undistort_point(p, CS.Fxycxy(cam_id), CS.Distortion(cam_id));
-        addPointView(p, cam_id, id, j);
+        if(opt.cornerGating){
+          pending.push_back(PendingCorner{p, cam_id, id, j, cornerGateError(p, cam_id, id, j)});
+        }else{
+          addPointView(p, cam_id, id, j);
+        }
       }
     }
   }
 }
 
+double KomoArucoTracker::cornerGateError(const arr& p, uint cam_id, uint aruco_id, uint corner_id){
+  Frame *arc = CS.C.getFrame(STRING("arc_"<<aruco_id <<'_' <<corner_id), false);
+  if(!arc) return -1.;
+  Frame *arcF = komo->timeSlices(0, arc->ID);
+  Frame *camF = komo->timeSlices(0, CS.cams(cam_id)->ID);
+  //predicted corner position in the camera frame, at the warm start (= last solution)
+  Vector rel = (arcF->ensure_X().pos - camF->ensure_X().pos) / camF->ensure_X().rot;
+  //viewing ray of the measured pixel (same model as F_PointView)
+  const arr& f = CS.Fxycxy(cam_id);
+  Vector x((p(0)-f(2))/f(0), (p(1)-f(3))/f(1), 1.);
+  double n = x.length()*rel.length();
+  if(n<1e-9) return -1.;
+  if(x*rel<0.) return 1.; //predicted corner opposite to the viewing ray
+  return (x^rel).length()/n; //sin of the angle between viewing ray and predicted corner
+}
+
 void KomoArucoTracker::solve(int verbose, double tolerance){
+  //-- corner gating: decide which buffered observations enter the problem
+  if(opt.cornerGating){
+    uint n_fail=0;
+    for(PendingCorner& o:pending) if(o.err>opt.gate_angle) n_fail++;
+    lost = (!q_accepted.N || double(n_fail) > opt.gate_lostRatio*double(pending.size()));
+    for(PendingCorner& o:pending){
+      if(lost || o.err<=opt.gate_angle) addPointView(o.p, o.cam_id, o.aruco_id, o.corner_id);
+      else n_gated++;
+    }
+    pending.clear();
+  }
+
+  //-- weak motion prior towards the last accepted estimate (dropped when the gate declared us lost)
+  if(opt.motionPrior && q_accepted.N && !lost){
+    komo->addObjective({1.}, make_shared<F_qItself>(uintA{CS.obj->ID}, false), {}, OT_sos, {opt.priorWeight}, q_accepted);
+  }
+
   komo->addQuaternionNorms({}, 1e1, false);
 
   // cout <<komo->report() <<endl;
@@ -300,10 +342,25 @@ void KomoArucoTracker::solve(int verbose, double tolerance){
     // komo->checkGradients();
   }
 
-  if(ret->sos<10.){
-      // filter.update(ret->x);
+  if(opt.cornerGating || opt.motionPrior){
+    //robust mode: per-corner-normalized acceptance; the published pose only advances on accepted frames
+    accepted = (n_corners && ret->sos < opt.sosPerCorner*n_corners);
+    if(accepted){
+      q_accepted = ret->x;
       filter.q = ret->x;
+    }
+  }else{
+    if(ret->sos<10.){
+        // filter.update(ret->x);
+        filter.q = ret->x;
+    }
   }
+}
+
+arr KomoArucoTracker::publishedPose(){
+  if((opt.cornerGating || opt.motionPrior) && q_accepted.N) return q_accepted;
+  if(ret) return ret->x;
+  return arr{};
 }
 
 NaiveTrackerFilter::NaiveTrackerFilter(double threshold) : threshold(threshold) {
@@ -415,8 +472,11 @@ void KomoArucoTracker_Thread::step() {
 
     timer.tic(4);
 
-    obj_pose.set() = tracker.ret->x;
-    state.set()->q({tracker.CS.obj->joint->qIndex, tracker.CS.obj->joint->qIndex+7}) = tracker.ret->x;
+    arr q_obj = tracker.publishedPose();
+    if(q_obj.N){
+      obj_pose.set() = q_obj;
+      state.set()->q({tracker.CS.obj->joint->qIndex, tracker.CS.obj->joint->qIndex+7}) = q_obj;
+    }
 }
 
 } //namespace
